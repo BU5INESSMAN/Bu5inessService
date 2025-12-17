@@ -19,14 +19,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Токен будет в переменных окружения на Railway
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Для Railway
 
 TEMP_DIR = "downloads"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 pending_urls = {}
 
-# Контроль частоты обновлений прогресса
+# Контроль частоты обновлений прогресса (по пользователю)
 last_progress_update = {}
 
 def clean_ansi(text: str) -> str:
@@ -80,22 +80,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_message = await query.edit_message_text("Подготовка к скачиванию... ⏳")
     user_id = query.from_user.id
 
-    def progress_hook(d):
-        if user_id not in last_progress_update:
-            last_progress_update[user_id] = 0
+    # Инициализация времени последнего обновления
+    last_progress_update[user_id] = 0
 
+    def progress_hook(d):
         now = asyncio.get_event_loop().time()
-        if d['status'] == 'downloading' and now - last_progress_update[user_id] > 5:
+        if d['status'] == 'downloading' and now - last_progress_update[user_id] > 5:  # Не чаще 5 сек
             percent = clean_ansi(d.get('_percent_str', '0%')).strip()
             speed = clean_ansi(d.get('_speed_str', 'N/A')).strip()
             eta = clean_ansi(d.get('_eta_str', 'N/A')).strip()
             text = f"Скачивание: {percent}\nСкорость: {speed}\nОсталось: {eta}"
             last_progress_update[user_id] = now
-            asyncio.create_task(
-                status_message.edit_text(text).catch(Exception, lambda e: None)
-            )
+            # Безопасное редактирование с try/except
+            asyncio.create_task(safe_edit(status_message, text))
         elif d['status'] == 'finished':
-            asyncio.create_task(status_message.edit_text("Скачивание завершено! Обрабатываю..."))
+            asyncio.create_task(safe_edit(status_message, "Скачивание завершено! Обрабатываю..."))
+
+    async def safe_edit(message, text):
+        try:
+            await message.edit_text(text)
+        except Exception as e:
+            logger.debug(f"Не удалось обновить прогресс: {e}")
 
     ydl_opts = {
         'outtmpl': os.path.join(TEMP_DIR, '%(id)s.%(ext)s'),
